@@ -1,8 +1,8 @@
 module BattleUtils exposing (..)
 import Random
 
-perfectHitRate : Int
-perfectHitRate = 255
+PERFECT_HIT_RATE : Int
+PERFECT_HIT_RATE = 255
 
 getRandomNumberFromRange : Int -> Int -> Int -> (Int, Random.Seed)
 getRandomNumberFromRange start end seed =
@@ -18,6 +18,7 @@ type Attack =
     | PlayerPhysicalMultipleAttack
     | PlayerMagicalAttack 
     | PlayerMagicalMultipleAttack
+    | PlayerHealingAttack
     | MonsterPhysicalAttack
     | MonsterPhysicalMultipleAttack
     | MonsterMagicalAttack
@@ -222,6 +223,7 @@ getDamageStep5 attack hasMorphStatus hasBerserkStatus isCriticalHit damage =
 
 -- Step 6
 
+-- 224 was what I had defaulted to
 getDamageModificationsVariance : Int -> Int
 getDamageModificationsVariance seed = Tuple.first (getRandomNumberFromRange 224 255 seed)
 
@@ -257,5 +259,229 @@ getStep6SafeShellModification attack targetHasSafeStatus targetHasShellStatus da
         _ ->
             damage
 
+getStep6DefendingModification : Attack -> Bool -> Int -> Int
+getStep6DefendingModification attack targetDefending damage = 
+    case attack of
+        PlayerPhysicalAttack ->
+            if targetDefending == True then
+                damage // 2
+            else
+                damage
+        _ ->
+            damage
 
+getStep6BackRowModification : Attack -> Bool -> Int -> Int
+getStep6BackRowModification attack targetIsInBackRow damage =
+    case attack of
+        PlayerPhysicalAttack ->
+            if targetIsInBackRow == True then
+                damage // 2
+            else
+                damage
+        _ ->
+            damage
+
+getStep6MorphModification : Attack -> Bool -> Int -> Int
+getStep6MorphModification attack targetHasMorphStatus damage = 
+    case attack of
+        PlayerMagicalAttack ->
+            if targetHasMorphStatus == True then
+                damage // 2
+            else
+                damage
+        _ ->
+            damage
+
+getStep6HealingAttack : Attack -> Bool -> Bool -> Int -> Int
+getStep6HealingAttack attack targetIsSelf targetIsCharacter damage =
+    case attack of
+        PlayerHealingAttack ->
+            if targetIsSelf == True && targetIsCharacter == True then
+                damage // 2
+            else
+                damage
+        _ ->
+            damage
+
+getStep6Damage
+    : Attack
+    -> Int
+    -> Int
+    -> Int
+    -> Bool
+    -> Bool
+    -> Bool
+    -> Bool
+    -> Bool
+    -> Bool
+    -> Bool
+    -> Int
+    -> Int
+getStep6Damage attack variance defense magicalDefense targetHasSafeStatus targetHasShellStatus targetDefending targetIsInBackRow targetHasMorphStatus targetIsSelf targetIsCharacter damage =
+    getDamageStep6Basic variance damage
+    |> getStep6DefenseModification attack defense magicalDefense
+    |> getStep6SafeShellModification attack targetHasSafeStatus targetHasShellStatus
+    |> getStep6DefendingModification attack targetDefending 
+    |> getStep6BackRowModification attack targetIsInBackRow
+    |> getStep6MorphModification attack targetHasMorphStatus
+    |> getStep6HealingAttack attack targetIsSelf targetIsCharacter
+
+
+-- Step 7
+
+getStep7Damage : Attack -> Bool -> Int -> Int
+getStep7Damage attack hittingTargetsBack damage =
+    case attack of
+        PlayerPhysicalAttack ->
+            if hittingTargetsBack == True then
+                (damage // 2) * 1 + damage
+            else
+                damage
+        _ ->
+            damage
+
+-- Step 8
+
+getDamageStep8 : Bool -> Int -> Int
+getDamageStep8 targetHasPetrifyStatus damage =
+    if targetHasPetrifyStatus == True then
+        0
+    else
+        damage
+
+
+-- Step 9
+
+type ElementEffect =
+    ElementHasBeenNullified
+    | TargetAbsorbsElement
+    | TargetIsImmuneToElement
+    | TargetIsResistantToElement
+    | TargetIsWeakToElement
+
+getDamageStep9 : ElementEffect -> Int -> Int
+getDamageStep9 elementEffect damage =
+    case elementEffect of
+        ElementHasBeenNullified -> 0
+        TargetAbsorbsElement -> damage * -1
+        TargetIsImmuneToElement -> 0
+        TargetIsResistantToElement -> damage // 2
+        TargetIsWeakToElement -> damage * 2
+
+
+--
+
+getRandomHitOrMissvalue : Int -> Int
+getRandomHitOrMissvalue seed = Tuple.first (getRandomNumberFromRange 0 99 seed)
+
+getRandomStaminaHitOrMissValue : Int -> Int
+getRandomStaminaHitOrMissValue seed = Tuple.first (getRandomNumberFromRange 0 127 seed)
+
+getRandomImageStatusRemoval : Int -> Int
+getRandomImageStatusRemoval seed = Tuple.first (getRandomNumberFromRange 0 3 seed)
+
+getRemoveImageStatus : Int -> Bool
+getRemoveImageStatus seed = Tuple.first (getRandomNumberFromRange 1 4 seed) == 4
+
+getMonsterStamina : Int -> Int
+getMonsterStamina maxHitPoints = (maxHitPoints // 512) + 16 |> clamp 0 40
+
+-- Get Hit
+
+type AttackResult removeImageStatus = Hit | Miss | Unknown
+
+physicalAttackAgainstClearTarget targetHasClearStatus = 
+    if targetHasClearStatus then
+        Miss
+    else
+        Unknown
+
+magicalAttackAgainstClearTarget targetHasClearStatus = 
+    if targetHasClearStatus then
+        Hit
+    else
+        Unknown
+
+anyAttackWoundProtectMissDeath protectedFromWound attackMissesDeathProtectedTargets =
+    if protectedFromWound && attackMissesDeathProtectedTargets then
+        Miss
+    else
+        Unknown
+
+magicalAttackSpellUnblockable spellUnblockable = if spellUnblockable then Hit else Unknown
+
+-- No Special Attacks --
+
+attackUnmissableAgainstTarget targetHasSleepStatus targetHasPetrifyStatus targetHasFreezeStatus targetHasStopStatus =
+    if targetHasSleepStatus || targetHasPetrifyStatus || targetHasFreezeStatus || targetHasStopStatus then
+        Hit
+    else
+        Unknown
+
+physicalAttackBack backOfTarget = if backOfTarget then Hit else Unknown
+
+perfectHitRate hitRate = if hitRate == PERFECT_HIT_RATE then Hit else Unknown
+
+physicalAttackAgainstImageStatus targetHasImageStatus seed = 
+    if targetHasImageStatus then
+        if getRemoveImageStatus seed == True then
+            Hit True
+        else
+            Miss
+    else
+        Unknown
+
+getStep4eDefenseType isPhysicalAttack magicBlock defense = 
+    if isPhysicalAttack then defense else magicBlock
+getStep4eBaseBlockValueFromBlock block = (255 - block * 2) + 1
+clampStep4eBlockValue block = clamp 1 255 block
+getHitFromBlock isPhysicalAttack magicBlock defense hitRate randomHitOrMissValue =
+    let
+        block = getStep4eDefenseType isPhysicalAttack magicBlock defense
+        clampedBlock = clampStep4eBlockValue block
+    in
+        if ( (hitRate * clampedBlock) // 256) > randomHitOrMissValue then
+            Hit
+        else
+            Miss
+
+-- Special Attacks --
+
+getStep5bStaminaHitOrMiss targetStamina randomStaminaHitOrMiss hitInStep5a =
+    if targetStamina >= randomStaminaHitOrMiss then
+        Miss
+    else if hitInStep5a then
+        Hit
+    else
+        Miss
+
+getHit randomHitOrMissValue
+    randomStaminaHitOrMissValue
+    attack
+    targetHasClearStatus
+    protectedFromWound
+    attackMissesDeathProtectedTargets
+    attackCanBeBlockedByStamina
+    spellUnblockable
+    targetHasSleepStatus
+    targetHasPetrifyStatus
+    targetHasFreezeStatus
+    targetHasStopStatus
+    hittingTargetsBack
+    targetHasImageStatus
+    hitRate
+    targetDefense
+    targetMagicBlock
+    targetStamina
+    specialAttackType =
+
+    case attack of
+        PlayerPhysicalAttack ->
+            if physicalAttackAgainstClearTarget targetHasClearStatus == Miss then
+                Miss
+            else if magicalAttackAgainstClearTarget targetHasClearStatus == Hit then
+                Hit
+            else if anyAttackWoundProtectMissDeath protectedFromWound attackMissesDeathProtectedTargets == Miss then
+                Miss
+            else if 
 
