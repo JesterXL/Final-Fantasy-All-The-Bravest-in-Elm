@@ -1,8 +1,8 @@
 module BattleUtils exposing (..)
 import Random
 
-PERFECT_HIT_RATE : Int
-PERFECT_HIT_RATE = 255
+perfectHitRate : Int
+perfectHitRate = 255
 
 getRandomNumberFromRange : Int -> Int -> Int -> (Int, Random.Seed)
 getRandomNumberFromRange start end seed =
@@ -23,6 +23,22 @@ type Attack =
     | MonsterPhysicalMultipleAttack
     | MonsterMagicalAttack
     | MonsterMagicalMultipleAttack
+    | Special SpecialAttack
+
+
+type SpecialAttack = BREAK 
+                    | DOOM
+                    | DEMI
+                    | QUARTR
+                    | X_ZONE
+                    | W_WIND
+                    | SHOAT
+                    | ODIN
+                    | RAIDEN
+                    | ANTLION
+                    | SNARE
+                    | X_FER
+                    | GRAV_BOMB
 
 getDamageStep1A : Attack -> Int -> Int -> Int -> Int -> Int
 getDamageStep1A attack spellPower magicPower level damage =
@@ -388,42 +404,70 @@ getMonsterStamina maxHitPoints = (maxHitPoints // 512) + 16 |> clamp 0 40
 
 -- Get Hit
 
-type AttackResult removeImageStatus = Hit | Miss | Unknown
+type AttackResult = Hit Bool | Miss | Unknown
 
-physicalAttackAgainstClearTarget targetHasClearStatus = 
-    if targetHasClearStatus then
+isPhysicalAttack : Attack -> Bool
+isPhysicalAttack attack = 
+    case attack of
+        PlayerPhysicalAttack -> True
+        PlayerPhysicalMultipleAttack -> True
+        MonsterPhysicalAttack -> True
+        MonsterPhysicalMultipleAttack -> True
+        _ -> False
+
+isMagicalAttack : Attack -> Bool
+isMagicalAttack attack =
+    case attack of
+        MonsterMagicalAttack -> True
+        MonsterMagicalMultipleAttack -> True
+        PlayerMagicalAttack -> True
+        PlayerMagicalMultipleAttack -> True
+        _ -> False
+
+isSpecialAttack : Attack -> Bool
+isSpecialAttack attack = isPhysicalAttack attack == False && isMagicalAttack attack == False
+
+physicalAttackAgainstClearTarget : Attack -> Bool -> AttackResult
+physicalAttackAgainstClearTarget attack targetHasClearStatus = 
+    if isPhysicalAttack attack && targetHasClearStatus then
         Miss
     else
         Unknown
 
-magicalAttackAgainstClearTarget targetHasClearStatus = 
-    if targetHasClearStatus then
-        Hit
+magicalAttackAgainstClearTarget : Attack -> Bool -> AttackResult
+magicalAttackAgainstClearTarget attack targetHasClearStatus = 
+    if isMagicalAttack attack && targetHasClearStatus then
+        Hit False
     else
         Unknown
 
+anyAttackWoundProtectMissDeath : Bool -> Bool -> AttackResult
 anyAttackWoundProtectMissDeath protectedFromWound attackMissesDeathProtectedTargets =
     if protectedFromWound && attackMissesDeathProtectedTargets then
         Miss
     else
         Unknown
 
-magicalAttackSpellUnblockable spellUnblockable = if spellUnblockable then Hit else Unknown
+magicalAttackSpellUnblockable : Attack -> Bool -> AttackResult
+magicalAttackSpellUnblockable attack spellUnblockable = if isMagicalAttack attack && spellUnblockable then Hit False else Unknown
 
 -- No Special Attacks --
-
+attackUnmissableAgainstTarget : Bool -> Bool -> Bool -> Bool -> AttackResult
 attackUnmissableAgainstTarget targetHasSleepStatus targetHasPetrifyStatus targetHasFreezeStatus targetHasStopStatus =
     if targetHasSleepStatus || targetHasPetrifyStatus || targetHasFreezeStatus || targetHasStopStatus then
-        Hit
+        Hit False
     else
         Unknown
 
-physicalAttackBack backOfTarget = if backOfTarget then Hit else Unknown
+physicalAttackBack : Attack -> Bool -> AttackResult
+physicalAttackBack attack backOfTarget = if isPhysicalAttack attack && backOfTarget then Hit False else Unknown
 
-perfectHitRate hitRate = if hitRate == PERFECT_HIT_RATE then Hit else Unknown
+isPerfectHitRate : Int -> AttackResult
+isPerfectHitRate hitRate = if hitRate == perfectHitRate then Hit False else Unknown
 
-physicalAttackAgainstImageStatus targetHasImageStatus seed = 
-    if targetHasImageStatus then
+physicalAttackAgainstImageStatus : Attack -> Bool -> Int -> AttackResult
+physicalAttackAgainstImageStatus attack targetHasImageStatus seed = 
+    if isPhysicalAttack attack && targetHasImageStatus then
         if getRemoveImageStatus seed == True then
             Hit True
         else
@@ -431,33 +475,73 @@ physicalAttackAgainstImageStatus targetHasImageStatus seed =
     else
         Unknown
 
-getStep4eDefenseType isPhysicalAttack magicBlock defense = 
-    if isPhysicalAttack then defense else magicBlock
+getStep4eDefenseType : Attack -> Int -> Int -> Int
+getStep4eDefenseType attack magicBlock defense = if isPhysicalAttack attack then defense else magicBlock
+getStep4eBaseBlockValueFromBlock : Int -> Int
 getStep4eBaseBlockValueFromBlock block = (255 - block * 2) + 1
+clampStep4eBlockValue : Int -> Int
 clampStep4eBlockValue block = clamp 1 255 block
-getHitFromBlock isPhysicalAttack magicBlock defense hitRate randomHitOrMissValue =
+
+getHitFromBlock : Attack -> Int -> Int -> Int -> Int -> AttackResult
+getHitFromBlock attack magicBlock defense hitRate randomHitOrMissValue =
     let
-        block = getStep4eDefenseType isPhysicalAttack magicBlock defense
+        block = getStep4eDefenseType attack magicBlock defense
         clampedBlock = clampStep4eBlockValue block
     in
         if ( (hitRate * clampedBlock) // 256) > randomHitOrMissValue then
-            Hit
+            Hit False
         else
             Miss
 
 -- Special Attacks --
 
-getStep5bStaminaHitOrMiss targetStamina randomStaminaHitOrMiss hitInStep5a =
-    if targetStamina >= randomStaminaHitOrMiss then
-        Miss
-    else if hitInStep5a then
-        Hit
+getStep5bStaminaHitOrMiss : Attack -> Int -> Int -> AttackResult -> AttackResult
+getStep5bStaminaHitOrMiss attack targetStamina randomStaminaHitOrMiss hitInStep5a =
+    if isSpecialAttack attack then
+        if targetStamina >= randomStaminaHitOrMiss then
+            Miss
+        else if hitInStep5a == Hit False then
+            Hit False
+        else if hitInStep5a == Hit True then
+            Hit True
+        else
+            Miss
     else
-        Miss
+        Unknown
 
-getHit randomHitOrMissValue
+isHitOrMiss : AttackResult -> Bool
+isHitOrMiss attack = attack == Hit False || attack == Hit True || attack == Miss
+
+
+getHit 
+    : Int 
+    -> Int 
+    -> Attack 
+    -> Int 
+    -> Int 
+    -> Bool 
+    -> Bool
+    -> Bool
+    -> Bool
+    -> Bool
+    -> Bool
+    -> Bool
+    -> Bool
+    -> Bool
+    -> Bool
+    -> Bool
+    -> Int
+    -> Int
+    -> Int
+    -> Int
+    -> Int
+    -> Maybe AttackResult
+getHit 
+    randomHitOrMissValue
     randomStaminaHitOrMissValue
     attack
+    magicBlock
+    defense
     targetHasClearStatus
     protectedFromWound
     attackMissesDeathProtectedTargets
@@ -467,21 +551,41 @@ getHit randomHitOrMissValue
     targetHasPetrifyStatus
     targetHasFreezeStatus
     targetHasStopStatus
-    hittingTargetsBack
+    hittingBackOfTarget
     targetHasImageStatus
     hitRate
     targetDefense
     targetMagicBlock
     targetStamina
-    specialAttackType =
+    seed =
 
-    case attack of
-        PlayerPhysicalAttack ->
-            if physicalAttackAgainstClearTarget targetHasClearStatus == Miss then
-                Miss
-            else if magicalAttackAgainstClearTarget targetHasClearStatus == Hit then
-                Hit
-            else if anyAttackWoundProtectMissDeath protectedFromWound attackMissesDeathProtectedTargets == Miss then
-                Miss
-            else if 
-
+    let
+        physicalAttackAgainstClearTargetResult = physicalAttackAgainstClearTarget attack targetHasClearStatus
+        magicalAttackAgainstClearTargetResult = magicalAttackAgainstClearTarget attack targetHasClearStatus
+        anyAttackWoundProtectMissDeathResult = anyAttackWoundProtectMissDeath protectedFromWound attackMissesDeathProtectedTargets
+        magicalAttackSpellUnblockableResult = magicalAttackSpellUnblockable attack spellUnblockable
+        -- non-special attack
+        attackUnmissableAgainstTargetResult = attackUnmissableAgainstTarget targetHasSleepStatus targetHasPetrifyStatus targetHasFreezeStatus targetHasStopStatus
+        physicalAttackBackResult = physicalAttackBack attack hittingBackOfTarget
+        isPerfectHitRateResult = isPerfectHitRate hitRate
+        physicalAttackAgainstImageStatusResult = physicalAttackAgainstImageStatus attack targetHasImageStatus seed
+        getHitFromBlockResult = getHitFromBlock attack magicBlock defense hitRate randomHitOrMissValue
+        -- special attacks only use this step
+        getRandomStaminaHitOrMissValueResult = getRandomStaminaHitOrMissValue seed
+        getStep5bStaminaHitOrMissResult = getStep5bStaminaHitOrMiss attack targetStamina getRandomStaminaHitOrMissValueResult getHitFromBlockResult
+        results = [
+            physicalAttackAgainstClearTargetResult,
+            magicalAttackAgainstClearTargetResult,
+            anyAttackWoundProtectMissDeathResult,
+            magicalAttackSpellUnblockableResult,
+            attackUnmissableAgainstTargetResult,
+            physicalAttackBackResult,
+            isPerfectHitRateResult,
+            physicalAttackAgainstImageStatusResult,
+            getHitFromBlockResult,
+            getStep5bStaminaHitOrMissResult
+        ]
+        hitOrMisses = List.filter isHitOrMiss results
+        first = List.head hitOrMisses
+    in
+        first
